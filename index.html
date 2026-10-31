@@ -200,7 +200,7 @@ function closeDrawer(){$('#drawer-root').innerHTML=''}
 
 /* ---------------- Speicher ---------------- */
 const KEY='sokrates_v1', SKEY='sokrates_settings';
-const VERSION='3';
+const VERSION='4';
 const WORKER_URL='https://late-dust-70f5.zedtheleppelin.workers.dev';
 let S=null, memStore={};
 function lsGet(k){try{return localStorage.getItem(k)}catch(e){return memStore[k]??null}}
@@ -283,8 +283,15 @@ function refreshAIBadge(){$$('[data-aibadge]').forEach(e=>{e.textContent=provide
 function normalizeMsgs(msgs){const out=[];for(const m of msgs){if(out.length&&out[out.length-1].role===m.role)out[out.length-1].content+='\n\n'+m.content;else out.push({...m})}if(out.length&&out[0].role!=='user')out.unshift({role:'user',content:'(Beginn des Gesprächs)'});if(!out.length||out[out.length-1].role!=='user')out.push({role:'user',content:'(weiter)'});return out}
 function parseJSON(t){if(t&&typeof t==='object')return t;t=String(t||'');const a=t.indexOf('{'),b=t.lastIndexOf('}');if(a<0||b<a)throw new Error('Keine JSON-Antwort');return JSON.parse(t.slice(a,b+1))}
 function dataURLtoBlob(d){const[h,b]=d.split(',');const mime=h.match(/:(.*?);/)[1];const bin=atob(b);const u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return new Blob([u],{type:mime})}
+function explainError(e){const m=String(e&&e.message||e||'');
+  if(e&&e.code==='not_granted')return 'Der KI-Zugriff wurde nicht erlaubt.';
+  if(/Failed to fetch|NetworkError|Load failed/i.test(m))return `Der Zwischenserver hat die Anfrage abgewiesen oder ist nicht erreichbar. Meist stimmt bei Cloudflare ALLOWED_ORIGIN nicht. Dort muss genau stehen: ${location.origin}`;
+  if(/ 401/.test(m))return 'Mistral lehnt den Schlüssel ab (401). Prüfe MISTRAL_API_KEY bei Cloudflare und ob der Experiment-Tarif aktiviert ist.';
+  if(/ 403/.test(m))return `Zugriff verweigert (403). Bei Cloudflare muss ALLOWED_ORIGIN genau so lauten: ${location.origin}`;
+  if(/ 429/.test(m))return 'Zu viele Anfragen in kurzer Zeit (429) – kurz warten.';
+  return m.slice(0,200)}
 async function ask(system,messages,{json=false,image=null,tier='default',fallback}={}){
-  const p=provider();
+  const p=provider();AI.lastError=null;
   const fmt=json?'\n\nAntworte ausschließlich mit einem gültigen JSON-Objekt, ohne Markdown, ohne Text davor oder danach.':'';
   if(typeof messages==='string')messages=[{role:'user',content:messages}];
   try{
@@ -305,11 +312,13 @@ async function ask(system,messages,{json=false,image=null,tier='default',fallbac
       return json?parseJSON(t):t;
     }
   }catch(e){
-    console.warn(e);
+    console.warn(e);AI.lastError=explainError(e);
     if(e&&e.code==='not_granted')toast('KI-Zugriff wurde nicht erlaubt – Offline-Demo aktiv.');
     else if(e&&e.code==='rate_limited')toast('Die KI ist gerade ausgelastet. Kurz warten.');
-    else toast('KI nicht erreichbar – Offline-Antwort. ('+String(e.message||e).slice(0,80)+')',4000);
+    else toast('KI nicht erreichbar – Grund steht im Chat.',4000);
   }
+  if(p!=='offline'&&!AI.lastError)AI.lastError='Unbekannter Fehler.';
+  if(p==='offline')AI.lastError=null;
   await new Promise(r=>setTimeout(r,600));
   if(fallback)return fallback();
   return json?{}:'(Offline-Demo: Hier stünde die Antwort der KI. In den Einstellungen kannst du eine KI verbinden.)';
@@ -377,8 +386,12 @@ function openSettings(){
   <div id="mis"><p class="small muted" style="margin:.8em 0 0">Mit Zwischenserver (z. B. Cloudflare Worker): unten bei „API-Adresse“ dessen Adresse eintragen und den Schlüssel leer lassen – er liegt dann sicher auf dem Server.</p><label>Mistral API-Schlüssel (nur ohne Zwischenserver)</label><input id="key" type="password" placeholder="leer lassen bei Zwischenserver" value="${esc(st.key)}">
   <div class="two"><div><label>Modell</label><input id="model" value="${esc(st.model)}"></div><div><label>API-Adresse (Zwischenserver oder Mistral)</label><input id="base" value="${esc(st.base)}"></div></div></div>
   <p class="small muted" style="margin-top:1em">Aktuell aktiv: <b>${providerLabel()}</b>. Alle Daten (Reihen, Fortschritt, Ordner) liegen lokal in diesem Browser. Öffne SOKRATES in zwei Tabs, um Lehrkraft und Schüler:in gleichzeitig zu sehen.</p>
+  <div class="row" style="margin-top:.8em"><button class="bs" id="test">Verbindung testen</button><span class="small muted">Adresse dieser App: <b>${esc(location.origin)}</b></span></div><div id="testOut" class="small" style="margin-top:.6em"></div>
   <div class="actions"><button id="reset" class="bg" style="margin-right:auto;color:var(--bad)">Demo zurücksetzen</button><button data-x>Schließen</button><button class="bp" id="sv">Speichern</button></div>`);
   $('#prov',m).value=st.provider;
+  $('#test',m).onclick=async e=>{e.target.disabled=true;const o=$('#testOut',m);o.textContent='Teste …';
+    const r=await ask('Antworte nur mit dem Wort OK.','Test',{fallback:()=>null});
+    o.innerHTML=r?`<span class="chip ok">Verbindung steht</span> Antwort von ${esc(providerLabel())}: „${esc(String(r).slice(0,60))}“`:`<span class="chip bad">Keine Verbindung</span> ${esc(AI.lastError||'Keine KI ausgewählt.')}`;e.target.disabled=false};
   m.querySelector('[data-x]').onclick=closeModal;
   $('#sv',m).onclick=()=>{saveSettings({v:VERSION,provider:$('#prov',m).value,key:$('#key',m).value.trim(),model:$('#model',m).value.trim()||'mistral-large-latest',base:$('#base',m).value.trim()||WORKER_URL});closeModal();refreshAIBadge();toast(providerLabel())};
   $('#reset',m).onclick=async()=>{if(await confirmBox('Alle Reihen, Fortschritte und Ordner werden gelöscht und die Demo neu angelegt.','Zurücksetzen')){S=seed();persist();ui.role=null;renderStart();toast('Demo neu angelegt')}};
@@ -842,7 +855,7 @@ async function sendMsg(text){
   let image=null;if(p.drawn&&p.drawing&&p.drawingDirty&&AI.images&&provider()==='claude'){image=p.drawing;canvasNote+='\n\n[Die Zeichnung auf der Arbeitsfläche ist als Bild beigefügt.]';p.drawingDirty=false}
   else if(p.drawn)canvasNote+='\n\n[Auf der Arbeitsfläche gibt es außerdem eine Zeichnung/Skizze.]';
   if(canvasNote)msgs[msgs.length-1].content+=canvasNote;
-  const r=await ask(socraticSystem(s,m,p,grp),msgs,{json:true,image,fallback:()=>({reply:OFF_Q[(p.n||0)%OFF_Q.length]+'\n\n(Offline-Demo – verbinde in den Einstellungen eine KI.)',progress:clamp((p.p||0)+7,0,100),note_teacher:'(Offline-Demo) Beitrag eingegangen.',flag:null,folder:(p.n%4===3)?{type:'Erkenntnis',title:'Meine Formulierung',content:text.slice(0,240)}:null})});
+  const r=await ask(socraticSystem(s,m,p,grp),msgs,{json:true,image,fallback:()=>({reply:OFF_Q[(p.n||0)%OFF_Q.length]+(AI.lastError?'\n\n⚠ Standardantwort, weil die KI nicht erreichbar war: '+AI.lastError:'\n\n(Offline-Demo – verbinde in den Einstellungen eine KI.)'),progress:clamp((p.p||0)+7,0,100),note_teacher:'(Offline-Demo) Beitrag eingegangen.',flag:null,folder:(p.n%4===3)?{type:'Erkenntnis',title:'Meine Formulierung',content:text.slice(0,240)}:null})});
   sending=false;
   const reply=String(r.reply||'Hm, da bin ich kurz ins Stocken geraten. Kannst du das noch einmal anders formulieren?');
   th.push({role:'ai',t:now(),text:reply,folder:r.folder&&r.folder.content?r.folder:null});
