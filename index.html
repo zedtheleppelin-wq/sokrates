@@ -200,7 +200,7 @@ function closeDrawer(){$('#drawer-root').innerHTML=''}
 
 /* ---------------- Speicher ---------------- */
 const KEY='sokrates_v1', SKEY='sokrates_settings';
-const VERSION='4';
+const VERSION='5';
 const WORKER_URL='https://late-dust-70f5.zedtheleppelin.workers.dev';
 let S=null, memStore={};
 function lsGet(k){try{return localStorage.getItem(k)}catch(e){return memStore[k]??null}}
@@ -287,8 +287,8 @@ function explainError(e){const m=String(e&&e.message||e||'');
   if(e&&e.code==='not_granted')return 'Der KI-Zugriff wurde nicht erlaubt.';
   if(/Failed to fetch|NetworkError|Load failed/i.test(m))return `Der Zwischenserver hat die Anfrage abgewiesen oder ist nicht erreichbar. Meist stimmt bei Cloudflare ALLOWED_ORIGIN nicht. Dort muss genau stehen: ${location.origin}`;
   if(/ 401/.test(m))return 'Mistral lehnt den Schlüssel ab (401). Prüfe MISTRAL_API_KEY bei Cloudflare und ob der Experiment-Tarif aktiviert ist.';
-  if(/ 403/.test(m))return `Zugriff verweigert (403). Bei Cloudflare muss ALLOWED_ORIGIN genau so lauten: ${location.origin}`;
-  if(/ 429/.test(m))return 'Zu viele Anfragen in kurzer Zeit (429) – kurz warten.';
+  if(/ 403/.test(m))return `Mistral verweigert den Zugriff (403, Modell: ${settings().model}). Meist ist das Modell im Tarif nicht enthalten. Originalmeldung: „${m.replace(/^.*? 403 /,'').slice(0,160)}“`;
+  if(/ 429/.test(m)){const raw=(m.match(/"message"\s*:\s*"([^"]+)"/)||[])[1]||m.replace(/^.*? 429 /,'');return `Mistral meldet 429 (Modell: ${settings().model}). Originalmeldung: „${raw.slice(0,160)}“`}
   return m.slice(0,200)}
 async function ask(system,messages,{json=false,image=null,tier='default',fallback}={}){
   const p=provider();AI.lastError=null;
@@ -307,7 +307,7 @@ async function ask(system,messages,{json=false,image=null,tier='default',fallbac
       const body={model:st.model||'mistral-large-latest',messages:[{role:'system',content:system+fmt},...normalizeMsgs(messages)],temperature:.5};
       if(json)body.response_format={type:'json_object'};
       const r=await fetch((st.base||'https://api.mistral.ai/v1').replace(/\/$/,'')+'/chat/completions',{method:'POST',headers:Object.assign({'Content-Type':'application/json'},st.key?{'Authorization':'Bearer '+st.key}:{}),body:JSON.stringify(body)});
-      if(!r.ok)throw new Error('Mistral: '+r.status+' '+(await r.text()).slice(0,140));
+      if(!r.ok)throw new Error('Mistral: '+r.status+' '+(await r.text()).slice(0,400));
       const d=await r.json();const t=d.choices[0].message.content;
       return json?parseJSON(t):t;
     }
