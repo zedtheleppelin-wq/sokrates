@@ -200,6 +200,8 @@ function closeDrawer(){$('#drawer-root').innerHTML=''}
 
 /* ---------------- Speicher ---------------- */
 const KEY='sokrates_v1', SKEY='sokrates_settings';
+const VERSION='3';
+const WORKER_URL='https://late-dust-70f5.zedtheleppelin.workers.dev';
 let S=null, memStore={};
 function lsGet(k){try{return localStorage.getItem(k)}catch(e){return memStore[k]??null}}
 function lsSet(k,v){try{localStorage.setItem(k,v);return true}catch(e){memStore[k]=v;return false}}
@@ -207,7 +209,11 @@ let lastSaved='';
 function persist(){const str=JSON.stringify(S);lastSaved=str;if(!lsSet(KEY,str)&&!persist.warned){persist.warned=true;toast('Speicher voll oder nicht verfügbar – Daten nur bis zum Schließen.',4000)}}
 let pTimer=null;function persistSoon(){clearTimeout(pTimer);pTimer=setTimeout(persist,400)}
 function loadState(){const s=lsGet(KEY);if(s){try{S=JSON.parse(s);lastSaved=s;return}catch(e){}}S=seed();persist()}
-function settings(){try{return Object.assign({provider:'auto',key:'',model:'mistral-large-latest',base:'https://api.mistral.ai/v1'},JSON.parse(lsGet(SKEY)||'{}'))}catch(e){return {provider:'auto',key:'',model:'mistral-large-latest',base:'https://api.mistral.ai/v1'}}}
+function settings(){const d={provider:'auto',key:'',model:'mistral-large-latest',base:WORKER_URL};let o;try{o=Object.assign(d,JSON.parse(lsGet(SKEY)||'{}'))}catch(e){o=d}
+  // Ohne eigenen Schlüssel immer über den eingebauten Zwischenserver
+  if(!o.key&&(!o.base||/api\.mistral\.ai/.test(o.base)))o.base=WORKER_URL;
+  if(o.v!==VERSION){o.provider='auto';o.v=VERSION}
+  return o}
 function saveSettings(o){lsSet(SKEY,JSON.stringify(o))}
 
 /* ---------------- Demo-Daten ---------------- */
@@ -355,7 +361,7 @@ function renderStart(){
     <div class="logo">SOKRATES</div>
     <div class="claim">Verstehen statt auswendig lernen.</div>
     <div class="btns"><button class="bp" id="goT">Lehrkraft</button><button id="goS">Schüler:in</button></div>
-    <div class="foot row small"><span data-aibadge class="chip">…</span><button class="bg bs" data-settings>Einstellungen</button></div>
+    <div class="foot row small"><span class="muted">Version ${VERSION}</span><span data-aibadge class="chip">…</span><button class="bg bs" data-settings>Einstellungen</button></div>
   </div>`;
   $('#goT').onclick=()=>{ui.role='teacher';renderTeacherHome()};
   $('#goS').onclick=()=>{ui.role='student';renderStudentLogin()};
@@ -374,7 +380,7 @@ function openSettings(){
   <div class="actions"><button id="reset" class="bg" style="margin-right:auto;color:var(--bad)">Demo zurücksetzen</button><button data-x>Schließen</button><button class="bp" id="sv">Speichern</button></div>`);
   $('#prov',m).value=st.provider;
   m.querySelector('[data-x]').onclick=closeModal;
-  $('#sv',m).onclick=()=>{saveSettings({provider:$('#prov',m).value,key:$('#key',m).value.trim(),model:$('#model',m).value.trim()||'mistral-large-latest',base:$('#base',m).value.trim()||'https://api.mistral.ai/v1'});closeModal();refreshAIBadge();toast(providerLabel())};
+  $('#sv',m).onclick=()=>{saveSettings({v:VERSION,provider:$('#prov',m).value,key:$('#key',m).value.trim(),model:$('#model',m).value.trim()||'mistral-large-latest',base:$('#base',m).value.trim()||WORKER_URL});closeModal();refreshAIBadge();toast(providerLabel())};
   $('#reset',m).onclick=async()=>{if(await confirmBox('Alle Reihen, Fortschritte und Ordner werden gelöscht und die Demo neu angelegt.','Zurücksetzen')){S=seed();persist();ui.role=null;renderStart();toast('Demo neu angelegt')}};
 }
 
